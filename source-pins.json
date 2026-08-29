@@ -3,12 +3,12 @@
   "sources": {
     "fiducia-cloud/fiducia-messaging.rs": {
       "branch": "main",
-      "sha": "90cca91c6bc135e7196b88560579faadea1326f5",
+      "sha": "7d9a75e13700712a15480cfcd866139adf0d1c79",
       "exists": true
     },
     "fiducia-cloud/fiducia-node.rs": {
       "branch": "main",
-      "sha": "b9177646f9c69c67b76b3fbee9fded9b585e9c0c",
+      "sha": "55ffa3b3c754cfec2794690d32a8f95f9cc75b97",
       "exists": true
     }
   }
