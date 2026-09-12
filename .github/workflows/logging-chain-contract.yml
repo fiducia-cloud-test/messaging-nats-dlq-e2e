@@ -1,0 +1,84 @@
+name: Messaging logging chain contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/logging-chain-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  messaging-logging-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LOGGER_SHA: 1838474e85b0655080262cfa1135434f57545881
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Fetch exact logger source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init logger-source
+          git -C logger-source remote add origin https://github.com/ORESoftware/next-loggers.ts.git
+          git -C logger-source fetch --no-tags --depth=1 origin "$LOGGER_SHA"
+          test "$(git -C logger-source rev-parse FETCH_HEAD)" = "$LOGGER_SHA"
+          git -C logger-source checkout --detach "$LOGGER_SHA"
+      - name: Build lint surface
+        working-directory: logger-source
+        run: |
+          npm ci --ignore-scripts
+          ./node_modules/.bin/tsc -p tsconfig.build.json
+      - name: Verify messaging and DLQ chains
+        working-directory: logger-source
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { Linter } from 'eslint';
+          import eslintPlugin from './dist/eslint-plugin.js';
+
+          const lint = (code) => new Linter().verify(code, [{
+            languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+            plugins: { 'next-loggers': eslintPlugin },
+            rules: { 'next-loggers/require-observability-chain': 'error' },
+          }], { filename: 'messaging-dlq.mjs' });
+
+          const valid = lint(`
+            import { createLogger } from '@oresoftware/next-loggers';
+            const log = createLogger();
+            const routineId = 'ores-routine-FiduciaDlq_7qM2vN8xK4pR';
+            log.error('message moved to DLQ')
+              .addTraceId('ores-trace-FiduciaDlq_3kP9nR5sW2yT')
+              .addRoutineId(routineId)
+              .send();
+          `);
+          assert.deepEqual(valid, []);
+
+          const dynamicTrace = lint(`
+            import { logger } from '@oresoftware/next-loggers';
+            const traceId = makeTraceId();
+            const routineId = 'ores-routine-FiduciaMsg_6vN3qM9xP2kR';
+            logger.warn('runtime id used as static marker')
+              .addTraceId(traceId)
+              .addRoutineId(routineId)
+              .send();
+          `);
+          assert.equal(dynamicTrace.length, 1);
+          assert.match(dynamicTrace[0].message, /inline addTrace/);
+
+          const missingRoutine = lint(`
+            import { logger } from '@oresoftware/next-loggers';
+            logger.info('message acknowledged')
+              .addTraceId('ores-trace-FiduciaAck_8mQ4vN2xK7pR')
+              .send();
+          `);
+          assert.equal(missingRoutine.length, 1);
+          assert.match(missingRoutine[0].message, /routineId/);
+          NODE
